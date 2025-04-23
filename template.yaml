@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Dominiq
+  SAM Template for Dominiq Agent Management API
+
+Parameters:
+  Stage:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Tracing: Active
+    LoggingConfig:
+      LogFormat: JSON
+  Api:
+    TracingEnabled: true
+    Cors:
+      AllowMethods: "'*'"
+      AllowHeaders: "'*'"
+      AllowOrigin: "'*'"
+
+Resources:
+  AgentManagementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: Dominiq/agent_management/
+      Handler: adapters.aws_lambda.mangum_adapter.handler
+      Runtime: python3.12
+      Architectures:
+        - x86_64
+      Environment:
+        Variables:
+          # AWS Configuration
+          STAGE: dev
+          SECRET_NAME: !Sub '{{resolve:ssm:SECRET_NAME}}'
+          BUCKET_NAME: !Sub '{{resolve:ssm:BUCKET_NAME}}'
+          
+          # Database Configuration
+          DB_USERNAME: !Sub '{{resolve:ssm:DB_USERNAME}}'
+          DB_PASSWORD: !Sub '{{resolve:ssm-secure:DB_PASSWORD}}'
+          DB_HOST: !Sub '{{resolve:ssm:DB_HOST}}'
+          DB_PORT: !Sub '{{resolve:ssm:DB_PORT}}'
+          DB_NAME: !Sub '{{resolve:ssm:DB_NAME}}'
+          DB_SCHEMA: !Sub '{{resolve:ssm:DB_SCHEMA}}'
+          
+          # API Configuration
+          API_URL: !Sub '{{resolve:ssm:API_URL}}'
+          AUTH_TOKEN: !Sub '{{resolve:ssm-secure:AUTH_TOKEN}}'
+          
+          # SAIA Configuration
+          SAIA_API_URL: !Sub '{{resolve:ssm:SAIA_API_URL}}'
+          SAIA_AUTH_TOKEN: !Sub '{{resolve:ssm-secure:SAIA_AUTH_TOKEN}}'
+          
+          # Debug Configuration
+          LOG_LEVEL: !Sub '{{resolve:ssm:LOG_LEVEL}}'
+          ECHO_SQL: !Sub '{{resolve:ssm:ECHO_SQL}}'
+          
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub '*'
+        - S3CrudPolicy:
+            BucketName: !Ref S3Bucket
+        - SecretsManagerReadWrite
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: html-buckets
+      AccessControl: PublicRead
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders: ['*']
+            AllowedMethods: [GET, PUT, POST, DELETE, HEAD]
+            AllowedOrigins: ['*']
+            MaxAge: 3600
+
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name:
+        Fn::Sub: ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName:
+        Ref: ApplicationResourceGroup
+      AutoConfigurationEnabled: 'true'
+Outputs:
+  # ServerlessRestApi is an implicit API created out of Events key under Serverless::Function
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  AgentManagementApi:
+    Description: API Gateway endpoint URL for Prod stage for Agent Management API
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/"
+  AgentManagementFunction:
+    Description: Agent Management Lambda Function ARN
+    Value: !GetAtt AgentManagementFunction.Arn
+  AgentManagementFunctionIamRole:
+    Description: Implicit IAM Role created for Agent Management function
+    Value: !GetAtt AgentManagementFunctionRole.Arn
+  S3BucketName:
+    Description: Name of the S3 bucket created for file storage
+    Value: !Ref S3Bucket
+  S3BucketDomainName:
+    Description: Domain name of the S3 bucket
+    Value: !GetAtt S3Bucket.DomainName
